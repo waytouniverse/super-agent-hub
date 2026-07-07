@@ -61,6 +61,30 @@ Claude 写代码强、Codex 懂项目上下文、Hermes 擅长长文本……每
 
 ---
 
+## 📸 界面预览
+
+<p align="center">
+  <strong>🏠 引擎选择</strong><br/>
+  <img src="screenshot-home.png" alt="首页" width="720" />
+</p>
+
+<p align="center">
+  <strong>💬 对话界面</strong><br/>
+  <img src="screenshot-chat.png" alt="对话" width="720" />
+</p>
+
+<p align="center">
+  <strong>📊 Token 统计</strong><br/>
+  <img src="screenshot-stats.png" alt="统计" width="720" />
+</p>
+
+<p align="center">
+  <strong>💾 会话管理</strong><br/>
+  <img src="screenshot-sessions.png" alt="会话" width="720" />
+</p>
+
+---
+
 ## 📦 安装
 
 ### macOS (Apple Silicon)
