@@ -254,7 +254,6 @@ def get_token_stats(days: int = 7) -> dict:
            ORDER BY total_input DESC""",
         (f"-{days}",),
     ).fetchall()
-    conn.close()
 
     result = {
         "total_input": 0,
@@ -275,7 +274,21 @@ def get_token_stats(days: int = 7) -> dict:
         result["total_cost"] += r["total_cost"]
         result["total_events"] += r["events"]
 
-        model = r["model"] or "other"
+        model = r["model"] or ""
+        if not model:
+            session = conn.execute(
+                "SELECT engine FROM sessions WHERE id = ?", (r["session_id"],)
+            ).fetchone()
+            if session:
+                engine = session["engine"]
+                engine_defaults = {
+                    "claude": "claude-sonnet-4-6",
+                    "codex": "gpt-5-codex",
+                    "hermes": "hermes",
+                }
+                model = engine_defaults.get(engine, engine)
+        if not model:
+            model = "other"
         if model not in result["by_model"]:
             result["by_model"][model] = {"tokens": 0, "cost": 0}
         result["by_model"][model]["tokens"] += (
@@ -285,4 +298,5 @@ def get_token_stats(days: int = 7) -> dict:
         result["by_model"][model]["cost"] += r["total_cost"]
         result["by_session"].append(r)
 
+    conn.close()
     return result
