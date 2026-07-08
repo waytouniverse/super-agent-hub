@@ -10,6 +10,7 @@ from ..orchestrator import create_orchestrator, ADAPTER_MAP, ENGINE_DISPLAY
 from ..orchestrator.task_plan import Plan
 from ..session_store import (
     create_session,
+    get_session,
     get_messages,
     insert_message,
     update_message_content,
@@ -20,6 +21,52 @@ from ..stats import estimate_cost
 from ..config import load
 
 router = APIRouter()
+
+
+def _build_context_prompt(prompt: str, messages: list[dict]) -> str:
+    if not messages:
+        return prompt
+
+    lines = [
+        "以下是当前 Agent Hub 团队模式会话中最近的历史上下文。请把它当作同一个连续讨论来理解。",
+        "",
+    ]
+    for msg in messages[-30:]:
+        role = msg.get("role", "")
+        msg_type = msg.get("type", "text")
+        engine_name = msg.get("engine_name") or ""
+
+        if msg_type == "tool_call":
+            tool = msg.get("tool_name") or "tool"
+            tool_input = msg.get("tool_input") or ""
+            if len(tool_input) > 1200:
+                tool_input = tool_input[:1200] + "...[已截断]"
+            speaker = f"助手({engine_name})" if engine_name else "助手"
+            lines.append(f"{speaker}调用工具 {tool}: {tool_input}")
+            continue
+
+        content = msg.get("content") or ""
+        if not content:
+            continue
+        if len(content) > 1800:
+            content = content[:1800] + "...[已截断]"
+
+        if role == "user":
+            speaker = "用户"
+        elif role == "assistant":
+            speaker = f"助手({engine_name})" if engine_name else "助手"
+        elif role == "system":
+            speaker = "系统"
+        else:
+            speaker = role or "消息"
+        lines.append(f"{speaker}: {content}")
+
+    lines.extend([
+        "",
+        "现在用户的新消息是：",
+        prompt,
+    ])
+    return "\n".join(lines)
 
 
 @router.websocket("/ws/chat/team")
@@ -50,6 +97,7 @@ async def team_chat_websocket(ws: WebSocket):
             mode_config = data.get("mode_config", {})
             cwd = data.get("cwd", os.getcwd())
             permission_mode = data.get("permission_mode", "")
+            resume_session = data.get("resume_session", "")
 
             if not cwd or not os.path.isdir(os.path.expanduser(cwd)):
                 await ws.send_json({"type": "error", "content": "项目目录不存在"})
@@ -80,25 +128,37 @@ async def team_chat_websocket(ws: WebSocket):
                 await ws.send_json({"type": "error", "content": f"不支持的模式: {mode}"})
                 continue
 
-            # 创建会话
-            title = prompt[:80] + ("..." if len(prompt) > 80 else "")
-            team_config = {
-                "mode": mode,
-                "engines": valid_engines,
-                "cwd": cwd,
-            }
-            if mode in ("debate", "consultation"):
-                team_config["max_rounds"] = mode_config.get("max_rounds", 3)
-                team_config["judge_engine"] = mode_config.get("judge_engine", "")
+            existing_messages = []
+            if resume_session:
+                existing_session = get_session(resume_session)
+                if not existing_session:
+                    await ws.send_json({"type": "error", "content": "会话不存在"})
+                    continue
+                if existing_session.get("engine") != "team":
+                    await ws.send_json({"type": "error", "content": "不是团队模式会话"})
+                    continue
+                session_id = resume_session
+                title = existing_session.get("title") or prompt[:80]
+                existing_messages = get_messages(session_id)
+            else:
+                title = prompt[:80] + ("..." if len(prompt) > 80 else "")
+                team_config = {
+                    "mode": mode,
+                    "engines": valid_engines,
+                    "cwd": cwd,
+                }
+                if mode in ("debate", "consultation"):
+                    team_config["max_rounds"] = mode_config.get("max_rounds", 3)
+                    team_config["judge_engine"] = mode_config.get("judge_engine", "")
 
-            session_id = create_session(
-                engine="team",
-                model=", ".join(valid_engines),
-                cwd=cwd,
-                title=title,
-                team_mode=mode,
-                team_config=json.dumps(team_config, ensure_ascii=False),
-            )
+                session_id = create_session(
+                    engine="team",
+                    model=", ".join(valid_engines),
+                    cwd=cwd,
+                    title=title,
+                    team_mode=mode,
+                    team_config=json.dumps(team_config, ensure_ascii=False),
+                )
             await ws.send_json({
                 "type": "session_created",
                 "session_id": session_id,
@@ -108,8 +168,7 @@ async def team_chat_websocket(ws: WebSocket):
             })
 
             # 保存用户消息
-            existing = get_messages(session_id)
-            seq = len(existing) + 1
+            seq = len(existing_messages) + 1
             insert_message(
                 session_id=session_id,
                 role="user",
@@ -269,8 +328,10 @@ async def team_chat_websocket(ws: WebSocket):
                 config=orchestrator_config,
             )
 
+            agent_prompt = _build_context_prompt(prompt, existing_messages)
+
             try:
-                usages = await orchestrator.run(prompt, handle_event)
+                usages = await orchestrator.run(agent_prompt, handle_event)
             except Exception as e:
                 await ws.send_json({"type": "error", "content": str(e)})
                 update_session(session_id, status="interrupted")
@@ -322,7 +383,7 @@ async def team_chat_websocket(ws: WebSocket):
             for u in usages:
                 insert_token_event(
                     session_id,
-                    u.get("model", ""),
+                    u.get("model") or "other",
                     input_tokens=u.get("input_tokens", 0),
                     output_tokens=u.get("output_tokens", 0),
                     cache_read=u.get("cache_read", 0),

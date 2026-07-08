@@ -133,7 +133,7 @@ class BaseTeamOrchestrator:
             "output_tokens": final_usage.get("output_tokens", 0),
             "cache_read": final_usage.get("cache_read", 0),
             "cache_write": final_usage.get("cache_write", 0),
-            "model": final_usage.get("model", ""),
+            "model": final_usage.get("model") or engine_name,
         }
         self.total_usage.append(usage_entry)
 

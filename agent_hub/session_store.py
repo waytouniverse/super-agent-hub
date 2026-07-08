@@ -275,9 +275,7 @@ def get_token_stats(days: int = 7) -> dict:
         result["total_cost"] += r["total_cost"]
         result["total_events"] += r["events"]
 
-        model = r["model"] or ""
-        if not model:
-            continue
+        model = r["model"] or "other"
         if model not in result["by_model"]:
             result["by_model"][model] = {"tokens": 0, "cost": 0}
         result["by_model"][model]["tokens"] += (

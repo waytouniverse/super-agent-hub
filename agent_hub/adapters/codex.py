@@ -143,7 +143,7 @@ class CodexAdapter(BaseAdapter):
         if event_type == "turn.completed":
             usage = event.get("usage") or event.get("token_usage") or {}
             parsed = self.parse_usage(usage)
-            model = event.get("model") or event.get("model_name") or self.config.get("model", "")
+            model = event.get("model") or event.get("model_name") or self.config.get("model") or "gpt-5-codex"
             return MessageChunk("done", **parsed, model=model)
 
         if event_type == "error":
@@ -176,7 +176,7 @@ class CodexAdapter(BaseAdapter):
         usage = event.get("usage") or event.get("token_usage")
         if usage:
             parsed = self.parse_usage(usage)
-            model = event.get("model") or event.get("model_name") or self.config.get("model", "")
+            model = event.get("model") or event.get("model_name") or self.config.get("model") or "gpt-5-codex"
             return MessageChunk("done", **parsed, model=model)
 
         return None

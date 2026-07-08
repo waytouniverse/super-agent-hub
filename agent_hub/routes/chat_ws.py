@@ -304,7 +304,7 @@ async def chat_websocket(ws: WebSocket, engine: str):
                 output_t = final_usage.get("output_tokens", 0)
                 cache_r = final_usage.get("cache_read", 0)
                 cache_w = final_usage.get("cache_write", 0)
-                model = final_usage.get("model", effective_model)
+                model = final_usage.get("model") or effective_model
                 cost = estimate_cost(input_t, output_t, cache_r, cache_w, model)
 
                 update_session(
