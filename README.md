@@ -148,7 +148,8 @@ xattr -cr /Applications/Agent\ Hub.app
 - [x] 团队讨论模式（串行/并行/多轮辩论/会诊执行）
 - [x] Token 实时统计
 - [x] 会话持久化
-- [ ] Windows / Linux 支持
+- [x] Windows 支持
+- [ ] Linux 支持
 - [ ] 插件系统
 - [ ] 自定义 Agent 工作流
 
