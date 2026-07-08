@@ -235,6 +235,7 @@ export function useTeamSession() {
         mode_config: modeConfig,
         cwd: projectPath,
         permission_mode: allowProjectWrites ? 'acceptEdits' : 'default',
+        resume_session: sessionId,
       }));
       setMessages(prev => [...prev, {
         role: 'user', type: 'text', content: prompt, time: now,
@@ -262,7 +263,7 @@ export function useTeamSession() {
         wsRef.current = null;
       }
     };
-  }, [selectedEngines, mode, modeConfig, resetStreaming, handleEvent]);
+  }, [selectedEngines, mode, modeConfig, sessionId, resetStreaming, handleEvent]);
 
   const handleStop = useCallback(() => {
     if (wsRef.current) {
