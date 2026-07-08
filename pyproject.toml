@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-hub"
+version = "0.3.0"
+description = "统一 AI Agent 工作台 - 多引擎对话、Token 统计、会话永久保存"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "websockets>=12.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+agent-hub = "agent_hub.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_hub"]
+include = [
+    "agent_hub/**/*.py",
+    "frontend/dist/**/*",
+]

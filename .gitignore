@@ -1,2 +1,32 @@
+# macOS
 .DS_Store
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Rust / Tauri
+src-tauri/target/
+
+# PyInstaller output
+pyinstaller-dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.local
 *.dmg

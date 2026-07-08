@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/waytouniverse/super-agent-hub/releases/latest"><img src="https://img.shields.io/badge/下载-macOS%20Apple%20Silicon-blue?style=for-the-badge&logo=apple" alt="Download macOS"></a>
-  <img src="https://img.shields.io/badge/version-0.2.0-green?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.0-green?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/license-Apache%202.0-orange?style=for-the-badge" alt="License">
 </p>
 
@@ -30,7 +30,7 @@ Claude 写代码强、Codex 懂项目上下文、Hermes 擅长长文本……每
   </td>
   <td width="50%">
     <h3>👥 团队讨论模式</h3>
-    <p>选择 2-3 个引擎组成 AI 团队，串行审查讨论。后面的引擎会审查前面的发言，指出遗漏、纠正错误、综合总结。</p>
+    <p>选择 2-3 个引擎组成 AI 团队，支持串行审查、并行讨论、多轮辩论、会诊执行四种模式。让 AI 协作产出更高质量的结果。</p>
   </td>
 </tr>
 <tr>
@@ -133,7 +133,7 @@ xattr -cr /Applications/Agent\ Hub.app
 
 - [x] macOS Apple Silicon 支持
 - [x] 多引擎对话
-- [x] 团队讨论模式（多引擎串行审查）
+- [x] 团队讨论模式（串行/并行/多轮辩论/会诊执行）
 - [x] Token 实时统计
 - [x] 会话持久化
 - [ ] Windows / Linux 支持
