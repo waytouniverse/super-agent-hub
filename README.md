@@ -94,9 +94,17 @@ Claude 写代码强、Codex 懂项目上下文、Hermes 擅长长文本……每
 
 双击打开 → 拖入 `Applications` 文件夹 → 完成。
 
-### 首次打开提示"无法验证"怎么办？
+### Windows (x64)
 
-由于没有 Apple 开发者证书（$99/年），macOS 会提示安全警告。**不是恶意软件，代码完全开源可审计。**
+前往 [Releases](https://github.com/waytouniverse/super-agent-hub/releases/latest) 下载最新版 `.msi` 文件。
+
+双击安装 → 按向导完成安装 → 从开始菜单启动。
+
+### 首次打开提示"无法验证"/"未知发布者"怎么办？
+
+由于没有 Apple 开发者证书（$99/年）和 Windows 代码签名证书（$200+/年），操作系统会提示安全警告。**不是恶意软件，代码完全开源可审计。**
+
+**macOS：**
 
 **方法一（推荐）**：按住 Control 键点按 App → 选择「打开」→ 在弹出的对话框中点击「打开」。
 
@@ -106,6 +114,10 @@ Claude 写代码强、Codex 懂项目上下文、Hermes 擅长长文本……每
 ```bash
 xattr -cr /Applications/Agent\ Hub.app
 ```
+
+**Windows：**
+
+点击「更多信息」→「仍要运行」即可安装。或在 **Windows 安全中心 → 应用和浏览器控制** 中暂时关闭 SmartScreen。
 
 ---
 
