@@ -277,10 +277,14 @@ def get_token_stats(days: int = 7) -> dict:
         model = r["model"] or ""
         if not model:
             session = conn.execute(
-                "SELECT engine FROM sessions WHERE id = ?", (r["session_id"],)
+                "SELECT engine, model as session_model FROM sessions WHERE id = ?", (r["session_id"],)
             ).fetchone()
             if session:
                 engine = session["engine"]
+                if engine == "team":
+                    # team 模式：从 session.model 取第一个引擎名
+                    engine_list = (session["session_model"] or "").split(",")
+                    engine = engine_list[0].strip() if engine_list else "claude"
                 engine_defaults = {
                     "claude": "claude-sonnet-4-6",
                     "codex": "gpt-5-codex",
