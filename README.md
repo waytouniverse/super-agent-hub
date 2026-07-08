@@ -144,14 +144,11 @@ xattr -cr /Applications/Agent\ Hub.app
 ## 🗺 路线图
 
 - [x] macOS Apple Silicon 支持
+- [x] Windows 支持
 - [x] 多引擎对话
 - [x] 团队讨论模式（串行/并行/多轮辩论/会诊执行）
 - [x] Token 实时统计
 - [x] 会话持久化
-- [x] Windows 支持
-- [ ] Linux 支持
-- [ ] 插件系统
-- [ ] 自定义 Agent 工作流
 
 ---
 
