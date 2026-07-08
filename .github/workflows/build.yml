@@ -32,7 +32,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pyinstaller
-          npm ci
           cd frontend && npm ci
 
       - name: Build frontend
@@ -84,7 +83,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pyinstaller
-          npm ci
           cd frontend && npm ci
 
       - name: Build frontend
