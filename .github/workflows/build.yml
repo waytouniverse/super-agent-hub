@@ -29,10 +29,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
-        run: |
-          pip install pyinstaller
-          cd frontend && npm ci
+      - name: Install Python dependencies
+        run: pip install fastapi "uvicorn[standard]" websockets pydantic pyinstaller
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
 
       - name: Build frontend
         run: cd frontend && npm run build
@@ -80,10 +81,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
-        run: |
-          pip install pyinstaller
-          cd frontend && npm ci
+      - name: Install Python dependencies
+        run: pip install fastapi uvicorn websockets pydantic pyinstaller
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
 
       - name: Build frontend
         run: cd frontend && npm run build
