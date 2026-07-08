@@ -103,7 +103,7 @@ jobs:
             desktop_entry.py
           mkdir pyinstaller-dist
           copy dist\agent-hub-backend.exe pyinstaller-dist\agent-hub-backend.exe
-          rename pyinstaller-dist\agent-hub-backend.exe agent-hub-backend
+          mv pyinstaller-dist/agent-hub-backend.exe pyinstaller-dist/agent-hub-backend
 
       - name: Build Tauri MSI
         uses: tauri-apps/tauri-action@v0
