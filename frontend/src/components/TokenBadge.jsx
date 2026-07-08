@@ -9,24 +9,14 @@ export default function TokenBadge({ inputTokens, outputTokens, costCny }) {
   };
 
   return (
-    <div style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 'var(--space-2)',
-      padding: '2px 8px',
-      background: 'var(--bg-tertiary)',
-      borderRadius: 'var(--radius-sm)',
-      fontSize: 11,
-      fontFamily: "'JetBrains Mono', monospace",
-      color: 'var(--text-muted)',
-    }}>
+    <div className="token-badge">
       <span>in {format(inputTokens)}</span>
-      <span style={{ color: 'var(--border-active)' }}>·</span>
+      <span className="token-badge-separator">·</span>
       <span>out {format(outputTokens)}</span>
-      {costCny !== undefined && (
+      {costCny != null && (
         <>
-          <span style={{ color: 'var(--border-active)' }}>·</span>
-          <span style={{ color: 'var(--accent-cyan)' }}>&yen;{costCny.toFixed(2)}</span>
+          <span className="token-badge-separator">·</span>
+          <span className="token-badge-cost">&yen;{costCny.toFixed(2)}</span>
         </>
       )}
     </div>

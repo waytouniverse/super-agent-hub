@@ -109,7 +109,7 @@ def _detect_one(name: str, definition: dict) -> EngineInfo:
         name=name,
         display_name=definition["display_name"],
         vendor=definition["vendor"],
-        installed=executable is not None and config_dir.exists(),
+        installed=executable is not None,
         executable=executable,
         version=version,
         config_dir=str(config_dir) if config_dir.exists() else None,

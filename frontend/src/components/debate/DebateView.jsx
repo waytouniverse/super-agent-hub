@@ -2,6 +2,30 @@ import { useRef, useEffect } from 'react';
 import MessageBubble from '../MessageBubble';
 import JudgeCard from './JudgeCard';
 
+const INTERNAL_EVENT_TYPES = new Set([
+  'task_start', 'task_done', 'task_error',
+  'plan_generated', 'phase_start', 'phase_end',
+]);
+
+const TRANSIENT_TRANSPORT_MARKERS = [
+  'Reconnecting...',
+  'Falling back from WebSockets to HTTPS transport',
+  'stream disconnected before completion',
+  'Connection reset by peer',
+];
+
+function isTransientTransportMessage(content = '') {
+  return TRANSIENT_TRANSPORT_MARKERS.some((marker) => content.includes(marker));
+}
+
+function hasVisibleContent(msg) {
+  if (INTERNAL_EVENT_TYPES.has(msg.type)) return false;
+  if (isTransientTransportMessage(msg.content || '')) return false;
+  if (msg.type === 'system' && /正在发言\.\.\.$/.test(msg.content || '')) return false;
+  if (msg.role !== 'assistant' || msg.type !== 'text') return true;
+  return typeof msg.content === 'string' ? msg.content.trim().length > 0 : Boolean(msg.content);
+}
+
 export default function DebateView({
   messages,
   streamingContents,
@@ -25,107 +49,75 @@ export default function DebateView({
     );
   }
 
-  // Group messages by round
-  const rounds = [];
-  let currentRound = null;
-
-  for (const msg of messages) {
-    if (msg.type === 'round_separator') {
-      currentRound = { round: msg.round, label: msg.content, messages: [], judge: null };
-      rounds.push(currentRound);
-    } else if (msg.type === 'judge') {
-      if (currentRound) {
-        currentRound.judge = msg;
-      } else {
-        // Judge decision before any round separator (edge case)
-        const lastRound = rounds[rounds.length - 1];
-        if (lastRound) {
-          lastRound.judge = msg;
-        }
-      }
-    } else if (currentRound) {
-      currentRound.messages.push(msg);
-    } else {
-      // Messages before first round separator (user message)
-      if (rounds.length === 0) {
-        rounds.push({ round: 0, label: '', messages: [], judge: null });
-        rounds[0].messages.push(msg);
-      } else {
-        rounds[rounds.length - 1].messages.push(msg);
-      }
-    }
-  }
-
-  // Current streaming belongs to the last round
   const activeStreamEngines = Object.entries(streamingContents)
     .filter(([, v]) => v)
     .map(([k]) => k);
 
   return (
     <div className="debate-view">
-      {rounds.map((round, ri) => (
-        <div key={ri} className="debate-round">
-          {round.label && (
-            <div className="debate-round-header">
-              <span className="debate-round-label">{round.label}</span>
+      {messages.map((msg, idx) => {
+        if (!hasVisibleContent(msg)) {
+          return null;
+        }
+        if (msg.type === 'round_separator') {
+          return (
+            <div key={idx} className="team-separator">
+              <span className="team-separator-text">{msg.content}</span>
             </div>
-          )}
-
-          <div className="debate-round-messages">
-            {round.messages.map((msg, mi) => {
-              if (msg.role === 'user') {
-                return (
-                  <MessageBubble
-                    key={mi}
-                    role="user"
-                    content={msg.content}
-                    time={msg.time}
-                  />
-                );
-              }
-              if (msg.type === 'system') {
-                return (
-                  <div key={mi} className="team-separator">
-                    <span className="team-separator-text">{msg.content}</span>
-                  </div>
-                );
-              }
-              return (
-                <MessageBubble
-                  key={mi}
-                  role={msg.role}
-                  content={msg.content}
-                  time={msg.time}
-                  engine={msg.engine}
-                  showEngineLabel={true}
-                />
-              );
-            })}
-
-            {/* Streaming content for this round (only if last round) */}
-            {ri === rounds.length - 1 && activeStreamEngines.map((eng) => (
-              streamingContents[eng] ? (
-                <MessageBubble
-                  key={`stream-${eng}`}
-                  role="assistant"
-                  content={streamingContents[eng]}
-                  streaming={true}
-                  engine={eng}
-                  showEngineLabel={true}
-                />
-              ) : null
-            ))}
-          </div>
-
-          {round.judge && (
+          );
+        }
+        if (msg.type === 'judge') {
+          return (
             <JudgeCard
-              decision={round.judge.decision}
-              evaluation={round.judge.content}
-              finalSummary={round.judge.finalSummary}
-              round={round.judge.round || round.round}
+              key={idx}
+              decision={msg.decision}
+              evaluation={msg.content}
+              finalSummary={msg.finalSummary}
+              round={msg.round}
             />
-          )}
-        </div>
+          );
+        }
+        if (msg.type === 'system') {
+          return (
+            <div key={idx} className="team-separator">
+              <span className="team-separator-text">{msg.content}</span>
+            </div>
+          );
+        }
+        if (msg.role === 'user') {
+          return (
+            <MessageBubble
+              key={idx}
+              role="user"
+              content={msg.content}
+              time={msg.time}
+            />
+          );
+        }
+        return (
+          <MessageBubble
+            key={idx}
+            role={msg.role}
+            content={msg.content}
+            time={msg.time}
+            engine={msg.engine}
+            showEngineLabel={true}
+            toolCalls={msg.type === 'tool_call' ? [{ tool: msg.tool || msg.tool_name, input: msg.input || msg.tool_input }] : []}
+          />
+        );
+      })}
+
+      {activeStreamEngines.map((eng) => (
+        streamingContents[eng] ? (
+          <MessageBubble
+            key={`stream-${eng}`}
+            role="assistant"
+            content={streamingContents[eng]}
+            streaming={true}
+            engine={eng}
+            showEngineLabel={true}
+          />
+        ) : null
       ))}
 
       <div ref={bottomRef} />

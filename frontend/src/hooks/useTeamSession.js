@@ -1,10 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-const ENGINE_DISPLAY = {
-  claude: 'Claude',
-  codex: 'Codex',
-  hermes: 'Hermes',
-};
+const TRANSIENT_TRANSPORT_MARKERS = [
+  'Reconnecting...',
+  'Falling back from WebSockets to HTTPS transport',
+  'stream disconnected before completion',
+  'Connection reset by peer',
+];
+
+function isTransientTransportMessage(content = '') {
+  return TRANSIENT_TRANSPORT_MARKERS.some((marker) => content.includes(marker));
+}
 
 export function useTeamSession() {
   const [mode, setMode] = useState('serial');
@@ -100,17 +105,6 @@ export function useTeamSession() {
         // Initialize streaming content for this engine
         streamingRefs.current[eng] = '';
         setStreamingContents(prev => ({ ...prev, [eng]: '' }));
-        // Add "speaking" indicator only in serial mode
-        if (!data.phase || data.phase === 'discussion') {
-          const display = ENGINE_DISPLAY[eng] || eng;
-          if (selectedEngines.length <= 2 || !data.round) {
-            setMessages(prev => [...prev, {
-              role: 'system', type: 'system',
-              content: `${display} 正在发言...`,
-              engine: eng,
-            }]);
-          }
-        }
         break;
       }
 
@@ -123,6 +117,18 @@ export function useTeamSession() {
         break;
       }
 
+      case 'tool_call':
+        setMessages(prev => [...prev, {
+          role: 'assistant', type: 'tool_call',
+          tool: data.tool,
+          input: data.input,
+          engine: data.engine,
+          time: now(),
+          phase: data.phase,
+          round: data.round,
+        }]);
+        break;
+
       case 'engine_done': {
         const eng = data.engine;
         const content = streamingRefs.current[eng] || '';
@@ -130,13 +136,6 @@ export function useTeamSession() {
         if (content) {
           setMessages(prev => {
             const next = [...prev];
-            // Remove "speaking" system message
-            for (let i = next.length - 1; i >= 0; i--) {
-              if (next[i].type === 'system' && next[i].engine === eng) {
-                next.splice(i, 1);
-                break;
-              }
-            }
             next.push({
               role: 'assistant', type: 'text', content,
               time: now(), engine: eng,
@@ -163,13 +162,28 @@ export function useTeamSession() {
 
       case 'plan_generated':
         setPlan(data.plan);
+        setTasks((data.plan?.tasks || []).map((task) => ({
+          ...task,
+          status: 'pending',
+        })));
         setPlanConfirmed(false);
         break;
 
       case 'task_start':
-        setTasks(prev => prev.map(t =>
-          t.id === data.task_id ? { ...t, status: 'running' } : t
-        ));
+        setTasks(prev => {
+          const exists = prev.some(t => t.id === data.task_id);
+          if (exists) {
+            return prev.map(t =>
+              t.id === data.task_id ? { ...t, status: 'running', title: data.title || t.title, engine: data.engine || t.engine } : t
+            );
+          }
+          return [...prev, {
+            id: data.task_id,
+            title: data.title || data.task_id,
+            engine: data.engine || '',
+            status: 'running',
+          }];
+        });
         break;
 
       case 'task_done':
@@ -185,20 +199,26 @@ export function useTeamSession() {
         break;
 
       case 'done':
-        setSessionUsage(data.usage);
+        if (data.usage) {
+          setSessionUsage(data.usage);
+        }
         setIsStreaming(false);
         setCurrentEngine('');
         break;
 
       case 'error':
+        if (isTransientTransportMessage(data.content || '')) {
+          break;
+        }
         setMessages(prev => [...prev, {
           role: 'assistant', type: 'text',
           content: `*错误: ${data.content}*`,
           engine: data.engine || 'system',
         }]);
+        setIsStreaming(false);
         break;
     }
-  }, [selectedEngines]);
+  }, []);
 
   // Send message via WebSocket
   const handleSend = useCallback((prompt, projectPath, allowProjectWrites) => {
@@ -276,6 +296,10 @@ export function useTeamSession() {
   // Send plan confirmation on existing WebSocket (consultation mode)
   const handlePlanConfirm = useCallback((confirmedPlan) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setTasks((confirmedPlan?.tasks || []).map((task) => ({
+        ...task,
+        status: 'pending',
+      })));
       wsRef.current.send(JSON.stringify({
         type: 'plan_confirmed',
         confirmed: true,
@@ -309,7 +333,7 @@ export function useTeamSession() {
     currentEngine, streamingContents,
     // Round
     currentRound, maxRounds,
-    currentPhase,
+    currentPhase, setCurrentPhase,
     // Plan
     plan, setPlan, planConfirmed, setPlanConfirmed,
     // Execution

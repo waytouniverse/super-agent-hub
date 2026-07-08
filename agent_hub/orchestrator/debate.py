@@ -54,6 +54,7 @@ class DebateOrchestrator(BaseTeamOrchestrator):
                 )
 
             # 裁判评估（如果配置了裁判引擎）
+            judge_concluded = False
             if self.judge_engine and self.judge_engine in ENGINE_DISPLAY:
                 judge_prompt = build_judge_prompt(
                     round_num, self.max_rounds, round_transcripts,
@@ -64,10 +65,12 @@ class DebateOrchestrator(BaseTeamOrchestrator):
                 )
                 judge_content = judge_result.get("content", "")
                 decision = parse_judge_response(judge_content)
+                decision_value = decision.get("decision", "CONTINUE")
+                judge_concluded = decision_value == "CONCLUDE"
                 await on_event({
                     "type": "judge_decision",
                     "round": round_num,
-                    "decision": decision.get("decision", "CONTINUE"),
+                    "decision": decision_value,
                     "evaluation": decision.get("evaluation", ""),
                     "final_summary": decision.get("final_summary", ""),
                 })
@@ -84,9 +87,8 @@ class DebateOrchestrator(BaseTeamOrchestrator):
 
             await on_event({"type": "round_end", "round": round_num})
 
-            # 检查是否应该停止
-            # （裁判判定在 judge_decision 事件中，这里根据 max_rounds 控制）
-            if round_num >= self.max_rounds:
+            # 裁判判定 CONCLUDE 或达到最大轮数时停止
+            if judge_concluded or round_num >= self.max_rounds:
                 break
 
         await on_event({"type": "phase_end", "phase": "discussion"})

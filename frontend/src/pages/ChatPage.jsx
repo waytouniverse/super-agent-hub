@@ -44,19 +44,41 @@ export default function ChatPage() {
         setMessages(formatted);
         setSessionId(resumeId);
         sessionIdRef.current = resumeId;
-        if (data.session?.cwd) {
-          setProject(data.session.cwd).catch(() => {});
+        const s = data.session;
+        if (s?.cwd) {
+          setProject(s.cwd).catch(() => {});
+        }
+        if (s && (s.total_input_tokens || s.total_output_tokens)) {
+          setSessionUsage({
+            input_tokens: s.total_input_tokens,
+            output_tokens: s.total_output_tokens,
+            cache_read: s.total_cache_read || 0,
+            cache_write: s.total_cache_write || 0,
+            cost_cny: (s.total_cost_usd || 0) * 7.2,
+          });
         }
       }
     }).catch(() => {});
   }, [resumeId, setProject]);
 
-  // 切换引擎时断开旧连接
+  // 切换引擎时断开旧连接并重置会话状态，避免跨引擎串号
   useEffect(() => {
     return () => {
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (!resumeId) {
+        setMessages([]);
+        setStreamingContent('');
+        setIsStreaming(false);
+        setSessionId('');
+        setSessionUsage(null);
+        streamingRef.current = '';
+        sessionIdRef.current = '';
+      }
     };
-  }, [engine]);
+  }, [engine, resumeId]);
 
   const connectAndSend = useCallback((prompt) => {
     if (!projectPath) {

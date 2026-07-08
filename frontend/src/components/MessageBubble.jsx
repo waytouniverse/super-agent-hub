@@ -64,6 +64,11 @@ export default function MessageBubble({
     );
   }
 
+  const hasContent = typeof content === 'string' ? content.trim().length > 0 : Boolean(content);
+  if (!thinking && !hasContent && !toolCalls?.length && !tokenInfo) {
+    return null;
+  }
+
   const engineClass = ['claude', 'codex', 'hermes'].includes(engine) ? engine : 'team';
 
   return (
@@ -91,7 +96,7 @@ export default function MessageBubble({
         )}
         {thinking ? (
           <div className="message-content stream-cursor waiting-cursor" aria-live="polite" />
-        ) : content ? (
+        ) : hasContent ? (
           <div className={`message-content${streaming ? ' stream-cursor' : ''}`}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}

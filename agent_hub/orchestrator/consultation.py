@@ -107,15 +107,22 @@ class ConsultationOrchestrator(BaseTeamOrchestrator):
                     task_prompt, task.engine, on_event,
                     phase="execution",
                 )
-                await on_event({
-                    "type": "task_done",
-                    "task_id": task.id,
-                    "success": True,
-                    "usage": {
-                        "input_tokens": result.get("input_tokens", 0),
-                        "output_tokens": result.get("output_tokens", 0),
-                    },
-                })
+                if result.get("error"):
+                    await on_event({
+                        "type": "task_error",
+                        "task_id": task.id,
+                        "error": result["error"],
+                    })
+                else:
+                    await on_event({
+                        "type": "task_done",
+                        "task_id": task.id,
+                        "success": True,
+                        "usage": {
+                            "input_tokens": result.get("input_tokens", 0),
+                            "output_tokens": result.get("output_tokens", 0),
+                        },
+                    })
             except Exception as e:
                 await on_event({
                     "type": "task_error",

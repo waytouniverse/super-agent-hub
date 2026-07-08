@@ -1,5 +1,6 @@
 """配置管理"""
 
+import copy
 import json
 from pathlib import Path
 from typing import Optional
@@ -24,13 +25,16 @@ DEFAULT_CONFIG = {
 
 def load() -> dict:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    merged = copy.deepcopy(DEFAULT_CONFIG)
     if CONFIG_FILE.exists():
-        with open(CONFIG_FILE, "r") as f:
-            stored = json.load(f)
-        merged = DEFAULT_CONFIG.copy()
-        _deep_merge(merged, stored)
-        return merged
-    return DEFAULT_CONFIG.copy()
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                stored = json.load(f)
+            _deep_merge(merged, stored)
+        except (json.JSONDecodeError, OSError):
+            # 配置文件损坏时回退到默认配置，避免阻断所有功能
+            return copy.deepcopy(DEFAULT_CONFIG)
+    return merged
 
 
 def save(config: dict) -> None:

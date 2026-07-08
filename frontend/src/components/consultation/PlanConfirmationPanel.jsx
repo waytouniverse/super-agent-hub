@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Trash2, GripVertical, Play, Edit3, Check, X } from 'lucide-react';
 
 const ENGINE_NAMES = {
@@ -18,6 +18,12 @@ export default function PlanConfirmationPanel({
   );
   const [editingTask, setEditingTask] = useState(null);
   const [editDesc, setEditDesc] = useState('');
+
+  // plan 变化时（新的 plan_generated 到达）重新同步任务列表
+  useEffect(() => {
+    setTasks((plan?.tasks || []).map((t, i) => ({ ...t, _id: i })));
+    setEditingTask(null);
+  }, [plan]);
 
   const installedEngines = engines.filter((e) => e.installed);
 
@@ -70,8 +76,8 @@ export default function PlanConfirmationPanel({
         </div>
       </div>
 
-      {plan?.overview && (
-        <div className="plan-overview">{plan.overview}</div>
+      {(plan?.overview || plan?.summary) && (
+        <div className="plan-overview">{plan.overview || plan.summary}</div>
       )}
 
       <div className="plan-tasks">

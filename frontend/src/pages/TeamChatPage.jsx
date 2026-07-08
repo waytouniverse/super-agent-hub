@@ -6,7 +6,8 @@ import MessageBubble from '../components/MessageBubble';
 import TokenBadge from '../components/TokenBadge';
 import ParallelView from '../components/parallel/ParallelView';
 import DebateView from '../components/debate/DebateView';
-import ConsultationView from '../components/consultation/ConsultationView';
+import PlanConfirmationPanel from '../components/consultation/PlanConfirmationPanel';
+import TaskExecutionPanel from '../components/consultation/TaskExecutionPanel';
 import ModeSelector from '../components/team/ModeSelector';
 import ModeConfigPanel from '../components/team/ModeConfigPanel';
 import { useProject } from '../contexts/ProjectContext';
@@ -32,6 +33,30 @@ const MODE_LABELS = {
   debate: '多轮辩论',
   consultation: '会诊执行',
 };
+
+const TRANSIENT_TRANSPORT_MARKERS = [
+  'Reconnecting...',
+  'Falling back from WebSockets to HTTPS transport',
+  'stream disconnected before completion',
+  'Connection reset by peer',
+];
+
+const INTERNAL_EVENT_TYPES = new Set([
+  'task_start', 'task_done', 'task_error',
+  'plan_generated', 'phase_start', 'phase_end',
+]);
+
+function isTransientTransportMessage(content = '') {
+  return TRANSIENT_TRANSPORT_MARKERS.some((marker) => content.includes(marker));
+}
+
+function hasVisibleMessageContent(msg) {
+  if (INTERNAL_EVENT_TYPES.has(msg.type)) return false;
+  if (isTransientTransportMessage(msg.content || '')) return false;
+  if (msg.type === 'system' && /正在发言\.\.\.$/.test(msg.content || '')) return false;
+  if (msg.role !== 'assistant' || msg.type !== 'text') return true;
+  return typeof msg.content === 'string' ? msg.content.trim().length > 0 : Boolean(msg.content);
+}
 
 function TeamSetup({
   engines: allEngines,
@@ -140,12 +165,11 @@ function SerialMessageList({ messages, streamingContents, isStreaming }) {
   return (
     <>
       {messages.map((msg, idx) => {
+        if (!hasVisibleMessageContent(msg)) {
+          return null;
+        }
         if (msg.type === 'round_separator') {
-          return (
-            <div key={idx} className="debate-round-header" style={{ margin: '12px 0' }}>
-              <span className="debate-round-label">{msg.content}</span>
-            </div>
-          );
+          return null;
         }
         if (msg.type === 'system') {
           return (
@@ -161,6 +185,18 @@ function SerialMessageList({ messages, streamingContents, isStreaming }) {
               role="user"
               content={msg.content}
               time={msg.time}
+            />
+          );
+        }
+        if (msg.role === 'assistant' && msg.type === 'tool_call') {
+          return (
+            <MessageBubble
+              key={idx}
+              role="assistant"
+              content=""
+              engine={msg.engine}
+              showEngineLabel={true}
+              toolCalls={[{ tool: msg.tool || msg.tool_name, input: msg.input || msg.tool_input }]}
             />
           );
         }
@@ -261,11 +297,18 @@ export default function TeamChatPage() {
 
       // 一次性恢复所有状态
       team.setSelectedEngines(enginesList);
-      team.setSessionId(resumeId);
+      team.setSessionId(s.id || resumeId);
 
       if (s.cwd) setProject(s.cwd).catch(() => {});
 
       if (data.messages?.length) {
+        // 重建任务执行状态（按顺序处理事件）
+        let restoredPlan = null;
+        let restoredTasks = [];
+        let restoredPlanConfirmed = false;
+        let restoredPhase = '';
+        const taskStatuses = {}; // taskId -> { status, title, engine, error }
+
         const formatted = data.messages.map((m) => {
           const base = {
             role: m.role,
@@ -287,12 +330,86 @@ export default function TeamChatPage() {
               const j = JSON.parse(m.content || '{}');
               base.decision = j.decision || '';
               base.finalSummary = j.final_summary || '';
+              base.content = j.evaluation || '';
+            } catch {}
+          }
+
+          // 从消息中重建 plan/tasks/phase 状态
+          if (m.type === 'plan_generated') {
+            try {
+              restoredPlan = JSON.parse(m.content || '{}');
+            } catch {}
+          }
+          if (m.type === 'phase_start') {
+            restoredPhase = m.content || '';
+          }
+          if (m.type === 'phase_end') {
+            restoredPhase = '';
+          }
+          if (m.type === 'task_start') {
+            try {
+              const td = JSON.parse(m.content || '{}');
+              taskStatuses[td.task_id] = {
+                status: 'running',
+                title: td.title || '',
+                engine: td.engine || '',
+              };
+            } catch {}
+          }
+          if (m.type === 'task_done') {
+            try {
+              const td = JSON.parse(m.content || '{}');
+              if (taskStatuses[td.task_id]) {
+                taskStatuses[td.task_id].status = 'done';
+              }
+            } catch {}
+          }
+          if (m.type === 'task_error') {
+            try {
+              const td = JSON.parse(m.content || '{}');
+              if (taskStatuses[td.task_id]) {
+                taskStatuses[td.task_id].status = 'error';
+                taskStatuses[td.task_id].error = td.error || '';
+              }
             } catch {}
           }
 
           return base;
-        });
+        }).filter(hasVisibleMessageContent);
         team.setMessages(formatted);
+
+        // 兼容旧会话：即使没有 plan_generated 持久化，也能从任务事件重建
+        if (!restoredPlan && Object.keys(taskStatuses).length > 0) {
+          restoredPlan = { summary: '', tasks: [] };
+        }
+
+        // 应用重建的状态
+        if (restoredPlan) {
+          const hasTaskEvents = Object.keys(taskStatuses).length > 0;
+          // 只有明确被中断的会话（非 running 非 active）才标记 running 任务为中断
+          // running 状态表示后端仍在执行，刷新页面不应影响任务
+          const wasInterrupted = s.status === 'interrupted';
+          restoredTasks = Object.entries(taskStatuses).map(([id, ts]) => {
+            let finalStatus = ts.status;
+            if (finalStatus === 'running' && wasInterrupted) {
+              finalStatus = 'error';
+              ts.error = '会话中断，任务未完成';
+            }
+            return {
+              id,
+              title: ts.title,
+              engine: ts.engine,
+              status: finalStatus,
+              error: ts.error || '',
+            };
+          });
+          team.setPlan(restoredPlan);
+          team.setTasks(restoredTasks);
+          team.setPlanConfirmed(hasTaskEvents);
+        }
+        if (restoredPhase) {
+          team.setCurrentPhase(restoredPhase);
+        }
       }
 
       if (s.total_input_tokens || s.total_output_tokens) {
@@ -372,7 +489,7 @@ export default function TeamChatPage() {
     );
   }
 
-  const renderMessages = () => {
+  const renderDiscussion = () => {
     switch (team.mode) {
       case 'parallel':
         return (
@@ -394,18 +511,11 @@ export default function TeamChatPage() {
         );
       case 'consultation':
         return (
-          <ConsultationView
+          <DebateView
             messages={team.messages}
             streamingContents={team.streamingContents}
             currentEngine={team.currentEngine}
             selectedEngines={team.selectedEngines}
-            engines={engines}
-            plan={team.plan}
-            planConfirmed={team.planConfirmed}
-            tasks={team.tasks}
-            currentPhase={team.currentPhase}
-            isStreaming={team.isStreaming}
-            onPlanConfirm={(confirmedPlan) => team.handlePlanConfirm(confirmedPlan)}
           />
         );
       default:
@@ -418,6 +528,23 @@ export default function TeamChatPage() {
         );
     }
   };
+
+  const renderMessages = () => (
+    <>
+      {renderDiscussion()}
+      {team.plan && !team.planConfirmed && (
+        <PlanConfirmationPanel
+          plan={team.plan}
+          engines={engines}
+          onConfirm={(confirmedPlan) => team.handlePlanConfirm(confirmedPlan)}
+          onCancel={() => {}}
+        />
+      )}
+      {(team.planConfirmed || team.currentPhase === 'execution') && (
+        <TaskExecutionPanel tasks={team.tasks} />
+      )}
+    </>
+  );
 
   return (
     <div className="chat-page">

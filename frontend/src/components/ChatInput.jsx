@@ -57,6 +57,8 @@ export default function ChatInput({
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      // 中文输入法拼字期间的回车用于确认候选词，不应触发发送
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       handleSend();
     }

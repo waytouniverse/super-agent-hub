@@ -7,7 +7,8 @@ import os
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..orchestrator import create_orchestrator, ADAPTER_MAP, ENGINE_DISPLAY
-from ..orchestrator.task_plan import Plan
+from ..orchestrator.consultation import ConsultationOrchestrator, PLAN_SYSTEM_PROMPT
+from ..orchestrator.task_plan import Plan, TaskPlan, parse_plan_from_text
 from ..session_store import (
     create_session,
     get_session,
@@ -35,6 +36,20 @@ def _build_context_prompt(prompt: str, messages: list[dict]) -> str:
         role = msg.get("role", "")
         msg_type = msg.get("type", "text")
         engine_name = msg.get("engine_name") or ""
+
+        if role == "system" or msg_type in {
+            "judge",
+            "round_separator",
+            "phase_start",
+            "phase_end",
+            "round_start",
+            "round_end",
+            "task_start",
+            "task_done",
+            "task_error",
+            "plan_generated",
+        }:
+            continue
 
         if msg_type == "tool_call":
             tool = msg.get("tool_name") or "tool"
@@ -67,6 +82,62 @@ def _build_context_prompt(prompt: str, messages: list[dict]) -> str:
         prompt,
     ])
     return "\n".join(lines)
+
+
+def _build_plan_prompt(user_prompt: str, discussion_results: list[dict], allowed_engines: list[str]) -> str:
+    lines = [
+        PLAN_SYSTEM_PROMPT,
+        "",
+        "原始用户需求：",
+        user_prompt,
+        "",
+        f"可分配执行任务的引擎只能从这些值中选择：{', '.join(allowed_engines)}",
+        "",
+        "团队讨论结果：",
+    ]
+    for result in discussion_results:
+        engine = result.get("engine", "")
+        content = result.get("content", "")
+        if not content:
+            continue
+        display = ENGINE_DISPLAY.get(engine, engine or "unknown")
+        if len(content) > 4000:
+            content = content[:4000] + "\n...[内容已截断]"
+        lines.extend([
+            "",
+            f"### {display}",
+            content,
+        ])
+    lines.extend([
+        "",
+        "请基于以上讨论生成可执行的行动计划。不要只总结观点，必须拆成可执行、可验证的任务。",
+    ])
+    return "\n".join(lines)
+
+
+def _ensure_executable_plan(
+    plan: Plan,
+    user_prompt: str,
+    default_engine: str,
+    allowed_engines: list[str],
+) -> Plan:
+    if plan.tasks:
+        for task in plan.tasks:
+            if not task.engine or task.engine not in allowed_engines:
+                task.engine = default_engine
+        return plan
+    return Plan(
+        summary=plan.summary or "团队已完成讨论，但未能解析出结构化任务，已创建兜底执行任务。",
+        tasks=[
+            TaskPlan(
+                id="task-1",
+                title="执行用户需求",
+                description=f"根据团队讨论结果执行用户需求，并给出可验证的完成结果。\n\n用户需求：{user_prompt}",
+                engine=default_engine,
+                estimated_tool_calls=["Read", "Write", "Edit", "Bash"],
+            )
+        ],
+    )
 
 
 @router.websocket("/ws/chat/team")
@@ -183,6 +254,9 @@ async def team_chat_websocket(ws: WebSocket):
             engine_msg_ids: dict[str, int | None] = {
                 e: None for e in valid_engines
             }
+            engine_text_buffers: dict[str, str] = {
+                e: "" for e in valid_engines
+            }
 
             async def handle_event(event: dict):
                 nonlocal seq
@@ -194,6 +268,7 @@ async def team_chat_websocket(ws: WebSocket):
 
                 if evt_type == "engine_start":
                     engine_msg_ids[eng] = None
+                    engine_text_buffers[eng] = ""
                     await ws.send_json({
                         "type": "engine_start",
                         "engine": eng,
@@ -204,12 +279,14 @@ async def team_chat_websocket(ws: WebSocket):
 
                 elif evt_type == "text_stream":
                     content = event.get("content", "")
+                    engine_text_buffers[eng] = engine_text_buffers.get(eng, "") + content
+                    full_content = engine_text_buffers[eng]
                     if engine_msg_ids.get(eng) is None:
                         mid = insert_message(
                             session_id=session_id,
                             role="assistant",
                             msg_type="text",
-                            content=content,
+                            content=full_content,
                             sequence=seq,
                             engine_name=eng,
                             phase=phase,
@@ -218,7 +295,7 @@ async def team_chat_websocket(ws: WebSocket):
                         engine_msg_ids[eng] = mid
                         seq += 1
                     else:
-                        update_message_content(engine_msg_ids[eng], content)
+                        update_message_content(engine_msg_ids[eng], full_content)
                     await ws.send_json({
                         "type": "text_stream",
                         "engine": eng,
@@ -251,6 +328,7 @@ async def team_chat_websocket(ws: WebSocket):
 
                 elif evt_type == "engine_done":
                     engine_msg_ids[eng] = None
+                    engine_text_buffers[eng] = ""
                     await ws.send_json({
                         "type": "engine_done",
                         "engine": eng,
@@ -281,6 +359,12 @@ async def team_chat_websocket(ws: WebSocket):
                             "evaluation": event.get("evaluation", ""),
                             "final_summary": event.get("final_summary", ""),
                         }, ensure_ascii=False)
+                    elif evt_type == "plan_generated":
+                        ctx_content = json.dumps(
+                            event.get("plan", {}), ensure_ascii=False
+                        )
+                    elif evt_type == "phase_start":
+                        ctx_content = event.get("phase", "")
 
                     if ctx_content:
                         insert_message(
@@ -337,47 +421,90 @@ async def team_chat_websocket(ws: WebSocket):
                 update_session(session_id, status="interrupted")
                 break
 
-            # 会诊模式：等待用户确认计划，然后执行任务
-            if mode == "consultation" and hasattr(orchestrator, 'execute_tasks'):
-                plan = orchestrator._last_plan if hasattr(orchestrator, '_last_plan') else None
+            # 所有团队模式：讨论结束后必须进入计划确认，再执行任务
+            executor = ConsultationOrchestrator(valid_engines, cwd, orchestrator_config)
+            plan = getattr(orchestrator, "_last_plan", None)
+            if plan is not None:
+                plan = _ensure_executable_plan(plan, agent_prompt, valid_engines[0], valid_engines)
+            if plan is None:
+                await handle_event({"type": "phase_start", "phase": "planning"})
+                plan_engine = orchestrator_config.get("judge_engine") or valid_engines[0]
+                plan_result = await executor._run_one_engine(
+                    _build_plan_prompt(agent_prompt, usages, valid_engines),
+                    plan_engine,
+                    handle_event,
+                    phase="planning",
+                )
+                usages.append(plan_result)
+                plan = _ensure_executable_plan(
+                    parse_plan_from_text(plan_result.get("content", "")),
+                    agent_prompt,
+                    valid_engines[0],
+                    valid_engines,
+                )
+                await handle_event({
+                    "type": "plan_generated",
+                    "plan": plan.to_dict(),
+                    "summary": plan.summary,
+                })
+                await handle_event({"type": "phase_end", "phase": "planning"})
 
-                if plan:
-                    # 等待用户确认
-                    plan_confirmed = False
-                    confirmed_plan = None
-                    try:
-                        raw = await asyncio.wait_for(ws.receive_text(), timeout=600)
-                        data = json.loads(raw)
-                        if data.get("type") == "plan_confirmed" and data.get("confirmed"):
+            if plan:
+                plan_confirmed = False
+                confirmed_plan = None
+                try:
+                    raw = await asyncio.wait_for(ws.receive_text(), timeout=600)
+                    data = json.loads(raw)
+                    if data.get("type") == "plan_confirmed" and data.get("confirmed"):
+                        confirmed_data = data.get("plan", {})
+                        if confirmed_data.get("tasks"):
                             plan_confirmed = True
-                            confirmed_data = data.get("plan", {})
-                            if confirmed_data.get("tasks"):
-                                from ..orchestrator.task_plan import Plan as PlanCls
-                                confirmed_plan = PlanCls.from_dict(confirmed_data)
-                    except asyncio.TimeoutError:
-                        pass
+                            confirmed_plan = _ensure_executable_plan(
+                                Plan.from_dict(confirmed_data),
+                                agent_prompt,
+                                valid_engines[0],
+                                valid_engines,
+                            )
+                except asyncio.TimeoutError:
+                    pass
+                except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+                    # 计划确认消息格式错误，跳过执行阶段但不中断整个会话
+                    pass
 
-                    if plan_confirmed and confirmed_plan:
-                        try:
-                            exec_usages = await orchestrator.execute_tasks(confirmed_plan, handle_event)
-                            usages.extend(exec_usages)
-                        except Exception as e:
-                            await ws.send_json({"type": "error", "content": f"任务执行失败: {str(e)}"})
+                if plan_confirmed and confirmed_plan:
+                    try:
+                        executor.total_usage = []
+                        exec_usages = await executor.execute_tasks(confirmed_plan, handle_event)
+                        usages.extend(exec_usages)
+                    except Exception as e:
+                        await ws.send_json({"type": "error", "content": f"任务执行失败: {str(e)}"})
 
             # 汇总 token 统计
             total_input = sum(u.get("input_tokens", 0) for u in usages)
             total_output = sum(u.get("output_tokens", 0) for u in usages)
             total_cache_read = sum(u.get("cache_read", 0) for u in usages)
             total_cache_write = sum(u.get("cache_write", 0) for u in usages)
-            total_cost = estimate_cost(total_input, total_output, total_cache_read, total_cache_write, "claude-sonnet-4-6")
+            # 按每个引擎各自的模型分别计价再求和，混合引擎场景才准确
+            total_cost = sum(
+                estimate_cost(
+                    u.get("input_tokens", 0),
+                    u.get("output_tokens", 0),
+                    u.get("cache_read", 0),
+                    u.get("cache_write", 0),
+                    u.get("model") or "claude-sonnet-4-6",
+                )
+                for u in usages
+            )
 
+            # 累加到会话已有总量（多轮团队对话），而不是覆盖
+            prev = get_session(session_id) or {}
             update_session(
                 session_id,
-                total_input_tokens=total_input,
-                total_output_tokens=total_output,
-                total_cache_read=total_cache_read,
-                total_cache_write=total_cache_write,
-                total_cost_usd=round(total_cost, 6),
+                total_input_tokens=prev.get("total_input_tokens", 0) + total_input,
+                total_output_tokens=prev.get("total_output_tokens", 0) + total_output,
+                total_cache_read=prev.get("total_cache_read", 0) + total_cache_read,
+                total_cache_write=prev.get("total_cache_write", 0) + total_cache_write,
+                total_cost_usd=round((prev.get("total_cost_usd", 0) or 0) + total_cost, 6),
             )
 
             for u in usages:
@@ -393,7 +520,7 @@ async def team_chat_websocket(ws: WebSocket):
                         u.get("output_tokens", 0),
                         u.get("cache_read", 0),
                         u.get("cache_write", 0),
-                        u.get("model", "claude-sonnet-4-6"),
+                        u.get("model") or "claude-sonnet-4-6",
                     ), 6),
                 )
 

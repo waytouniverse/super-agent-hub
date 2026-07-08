@@ -77,6 +77,12 @@ def init_db() -> None:
             cost_usd REAL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS session_aliases (
+            alias_id TEXT PRIMARY KEY,
+            target_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
     # 迁移：为已有表添加新列
@@ -94,6 +100,26 @@ def init_db() -> None:
             conn.commit()
         except sqlite3.OperationalError:
             pass
+    conn.close()
+
+
+def resolve_session_id(session_id: str) -> str:
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT target_id FROM session_aliases WHERE alias_id = ?",
+        (session_id,),
+    ).fetchone()
+    conn.close()
+    return row["target_id"] if row else session_id
+
+
+def create_session_alias(alias_id: str, target_id: str) -> None:
+    conn = _get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO session_aliases (alias_id, target_id) VALUES (?, ?)",
+        (alias_id, target_id),
+    )
+    conn.commit()
     conn.close()
 
 
@@ -119,6 +145,7 @@ def create_session(
 
 
 def get_session(session_id: str) -> Optional[dict]:
+    session_id = resolve_session_id(session_id)
     conn = _get_conn()
     row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
     conn.close()
@@ -144,6 +171,7 @@ def list_sessions(limit: int = 50, offset: int = 0, engine: str = "") -> list[di
 def update_session(session_id: str, **kwargs) -> None:
     if not kwargs:
         return
+    session_id = resolve_session_id(session_id)
     kwargs["updated_at"] = datetime.now().isoformat()
     fields = ", ".join(f"{k} = ?" for k in kwargs)
     values = list(kwargs.values()) + [session_id]
@@ -154,7 +182,10 @@ def update_session(session_id: str, **kwargs) -> None:
 
 
 def delete_session(session_id: str) -> None:
+    session_id = resolve_session_id(session_id)
     conn = _get_conn()
+    # token_events 没有 ON DELETE CASCADE，需先手动删除避免外键约束报错
+    conn.execute("DELETE FROM token_events WHERE session_id = ?", (session_id,))
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()
@@ -176,6 +207,7 @@ def insert_message(
     round_num: int = 0,
     plan: str = "",
 ) -> int:
+    session_id = resolve_session_id(session_id)
     conn = _get_conn()
     cursor = conn.execute(
         """INSERT INTO messages (session_id, role, type, content,
@@ -208,6 +240,7 @@ def update_message_content(message_id: int, content: str) -> None:
 
 
 def get_messages(session_id: str) -> list[dict]:
+    session_id = resolve_session_id(session_id)
     conn = _get_conn()
     rows = conn.execute(
         "SELECT * FROM messages WHERE session_id = ? ORDER BY sequence ASC",
@@ -226,6 +259,7 @@ def insert_token_event(
     cache_write: int = 0,
     cost_usd: float = 0,
 ) -> None:
+    session_id = resolve_session_id(session_id)
     conn = _get_conn()
     conn.execute(
         """INSERT INTO token_events (session_id, model,

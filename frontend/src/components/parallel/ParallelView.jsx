@@ -13,6 +13,29 @@ const ENGINE_NAMES = {
   hermes: 'Hermes',
 };
 
+const INTERNAL_EVENT_TYPES = new Set([
+  'task_start', 'task_done', 'task_error',
+  'plan_generated', 'phase_start', 'phase_end',
+]);
+
+const TRANSIENT_TRANSPORT_MARKERS = [
+  'Reconnecting...',
+  'Falling back from WebSockets to HTTPS transport',
+  'stream disconnected before completion',
+  'Connection reset by peer',
+];
+
+function isTransientTransportMessage(content = '') {
+  return TRANSIENT_TRANSPORT_MARKERS.some((marker) => content.includes(marker));
+}
+
+function hasVisibleContent(msg) {
+  if (INTERNAL_EVENT_TYPES.has(msg.type)) return false;
+  if (isTransientTransportMessage(msg.content || '')) return false;
+  if (msg.role !== 'assistant' || msg.type !== 'text') return true;
+  return typeof msg.content === 'string' ? msg.content.trim().length > 0 : Boolean(msg.content);
+}
+
 export default function ParallelView({
   messages,
   streamingContents,
@@ -44,6 +67,7 @@ export default function ParallelView({
 
   for (const msg of messages) {
     if (msg.type === 'system') continue;
+    if (!hasVisibleContent(msg)) continue;
     if (msg.engine && engineMessages[msg.engine]) {
       engineMessages[msg.engine].push(msg);
     }
@@ -86,6 +110,7 @@ export default function ParallelView({
                     time={msg.time}
                     engine={msg.engine || eng}
                     showEngineLabel={false}
+                    toolCalls={msg.type === 'tool_call' ? [{ tool: msg.tool || msg.tool_name, input: msg.input || msg.tool_input }] : []}
                   />
                 ))}
                 {streaming && (

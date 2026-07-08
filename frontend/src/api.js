@@ -50,7 +50,14 @@ export async function validateProject(path) {
 
 export async function deleteSession(id) {
   const res = await fetch(`${BASE}/api/sessions/${id}`, { method: 'DELETE' });
-  return res.json();
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  try {
+    return await res.json();
+  } catch {
+    return { ok: true };
+  }
 }
 
 export async function fetchStats(days = 7) {

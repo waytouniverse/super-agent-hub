@@ -11,6 +11,14 @@ from typing import AsyncIterator
 from .base import BaseAdapter, MessageChunk
 
 
+TRANSIENT_TRANSPORT_MARKERS = (
+    "Reconnecting...",
+    "Falling back from WebSockets to HTTPS transport",
+    "stream disconnected before completion",
+    "Connection reset by peer",
+)
+
+
 def _detect_macos_proxy() -> str | None:
     """读取 macOS 系统代理设置，返回 https_proxy 值"""
     try:
@@ -34,6 +42,10 @@ def _detect_macos_proxy() -> str | None:
     except Exception:
         pass
     return None
+
+
+def _is_transient_transport_message(message: str) -> bool:
+    return any(marker in message for marker in TRANSIENT_TRANSPORT_MARKERS)
 
 
 class CodexAdapter(BaseAdapter):
@@ -98,6 +110,8 @@ class CodexAdapter(BaseAdapter):
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
+                    if _is_transient_transport_message(line):
+                        continue
                     yield MessageChunk("text", content=line + "\n")
                     continue
 
@@ -113,6 +127,9 @@ class CodexAdapter(BaseAdapter):
                 stderr = ""
                 if proc.stderr:
                     stderr = (await proc.stderr.read()).decode("utf-8", errors="replace").strip()
+                if stderr and _is_transient_transport_message(stderr):
+                    yield MessageChunk("error", content=stderr)
+                    return
                 yield MessageChunk(
                     "error",
                     content=stderr or f"Codex CLI 退出，状态码 {return_code}",
@@ -148,8 +165,8 @@ class CodexAdapter(BaseAdapter):
 
         if event_type == "error":
             message = event.get("message", "")
-            if message.startswith("Reconnecting..."):
-                return MessageChunk("text", content=f"{message}\n")
+            if _is_transient_transport_message(message):
+                return None
             return MessageChunk("error", content=message or "Codex CLI 出错")
 
         item = event.get("item") if isinstance(event.get("item"), dict) else {}

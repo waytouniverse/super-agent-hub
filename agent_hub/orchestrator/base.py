@@ -35,8 +35,11 @@ class BaseTeamOrchestrator:
         if not engine_info or not engine_info.installed:
             return None
         engine_config = self.config.get("engines", {}).get(engine_name, {})
+        engine_config = engine_config.copy()
+        if self.config.get("permission_mode"):
+            engine_config["permission_mode"] = self.config["permission_mode"]
         adapter_cls = ADAPTER_MAP[engine_name]
-        return adapter_cls(engine_info.executable, engine_config.copy())
+        return adapter_cls(engine_info.executable, engine_config)
 
     async def _run_one_engine(
         self,
@@ -64,11 +67,13 @@ class BaseTeamOrchestrator:
                 "content": f"{display} 未安装或不可用",
             })
             return {"engine": engine_name, "input_tokens": 0, "output_tokens": 0,
-                    "cache_read": 0, "cache_write": 0, "model": "", "content": ""}
+                    "cache_read": 0, "cache_write": 0, "model": "", "content": "",
+                    "error": f"{display} 未安装或不可用"}
 
         accumulated: list[str] = []
         final_usage: dict = {}
         has_content = False
+        error_message = ""
 
         try:
             async for chunk in adapter.chat_stream(prompt, "", self.cwd):
@@ -100,6 +105,7 @@ class BaseTeamOrchestrator:
 
                 elif chunk.type == "error":
                     err = chunk.data.get("content", "")
+                    error_message = err or "引擎返回错误"
                     if accumulated:
                         await on_event({
                             "type": "text_stream",
@@ -117,6 +123,7 @@ class BaseTeamOrchestrator:
                     break
 
         except Exception as e:
+            error_message = str(e)
             await on_event({
                 "type": "error",
                 "engine": engine_name,
@@ -134,6 +141,7 @@ class BaseTeamOrchestrator:
             "cache_read": final_usage.get("cache_read", 0),
             "cache_write": final_usage.get("cache_write", 0),
             "model": final_usage.get("model") or engine_name,
+            "error": error_message,
         }
         self.total_usage.append(usage_entry)
 

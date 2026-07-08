@@ -1,29 +1,23 @@
-import { ArrowRight, GitFork, MessageCircle, Stethoscope } from 'lucide-react';
+import { ArrowRight, GitFork, MessageCircle } from 'lucide-react';
 
 const MODES = [
   {
     id: 'serial',
     name: '串行审查',
     icon: ArrowRight,
-    desc: '引擎依次发言，后者审查前者输出，适合需要上下文积累的深度分析',
+    desc: '依次分析并审查，最后生成执行计划',
   },
   {
     id: 'parallel',
     name: '并行讨论',
     icon: GitFork,
-    desc: '所有引擎同时回答，各自独立输出，快速收集多方观点',
+    desc: '同时给出方案，汇总后生成执行计划',
   },
   {
     id: 'debate',
     name: '多轮辩论',
     icon: MessageCircle,
-    desc: '每轮并行发言后裁判评估，多轮深度辩论直至得出结论',
-  },
-  {
-    id: 'consultation',
-    name: '会诊执行',
-    icon: Stethoscope,
-    desc: '辩论→生成计划→确认→自动执行，从讨论到落地的完整流程',
+    desc: '多轮互相补充，收敛后生成执行计划',
   },
 ];
 
@@ -31,6 +25,7 @@ export default function ModeSelector({ mode, onChange }) {
   return (
     <div className="mode-selector">
       <div className="mode-selector-label">协作模式</div>
+      <div className="mode-selector-hint">所有模式都会在讨论后生成行动计划，确认后执行任务。</div>
       <div className="mode-selector-grid">
         {MODES.map((m) => {
           const Icon = m.icon;

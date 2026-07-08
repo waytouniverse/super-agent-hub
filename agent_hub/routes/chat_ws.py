@@ -153,8 +153,11 @@ async def chat_websocket(ws: WebSocket, engine: str):
                 await ws.send_json({"type": "error", "content": "项目目录不存在或不可用"})
                 continue
             cwd = os.path.abspath(os.path.expanduser(cwd))
+            # 每次请求都显式重置 permission_mode，避免上一次请求的值残留
             if permission_mode in {"default", "acceptEdits", "auto", "bypassPermissions", "dontAsk", "plan"}:
                 adapter.config["permission_mode"] = permission_mode
+            else:
+                adapter.config["permission_mode"] = "default"
             adapter.config["allowed_tools"] = (
                 ["Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "LS", "Bash"]
                 if allow_project_tools else []
@@ -307,13 +310,15 @@ async def chat_websocket(ws: WebSocket, engine: str):
                 model = final_usage.get("model") or effective_model
                 cost = estimate_cost(input_t, output_t, cache_r, cache_w, model)
 
+                # 累加到会话已有的总量（多轮对话），而不是覆盖
+                prev = get_session(session_id) or {}
                 update_session(
                     session_id,
-                    total_input_tokens=input_t,
-                    total_output_tokens=output_t,
-                    total_cache_read=cache_r,
-                    total_cache_write=cache_w,
-                    total_cost_usd=round(cost, 6),
+                    total_input_tokens=prev.get("total_input_tokens", 0) + input_t,
+                    total_output_tokens=prev.get("total_output_tokens", 0) + output_t,
+                    total_cache_read=prev.get("total_cache_read", 0) + cache_r,
+                    total_cache_write=prev.get("total_cache_write", 0) + cache_w,
+                    total_cost_usd=round((prev.get("total_cost_usd", 0) or 0) + cost, 6),
                 )
                 insert_token_event(
                     session_id, model,
