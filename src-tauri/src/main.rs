@@ -14,12 +14,14 @@ fn find_backend() -> PathBuf {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
 
+    let name = "agent-hub-backend";
+
     // macOS .app bundle: binary at Contents/MacOS/, resources at Contents/Resources/_up_/
     let resource_candidates = vec![
-        exe_dir.join("../Resources/_up_/pyinstaller-dist/agent-hub-backend"),
-        exe_dir.join("../Resources/agent-hub-backend"),
-        exe_dir.join("../../Resources/_up_/pyinstaller-dist/agent-hub-backend"),
-        exe_dir.join("agent-hub-backend"),
+        exe_dir.join("../Resources/_up_/pyinstaller-dist").join(name),
+        exe_dir.join("../Resources").join(name),
+        exe_dir.join("../../Resources/_up_/pyinstaller-dist").join(name),
+        exe_dir.join(name),
     ];
 
     for path in &resource_candidates {
@@ -29,13 +31,13 @@ fn find_backend() -> PathBuf {
     }
 
     // 2. Development fallback
-    let dev_path = PathBuf::from("../pyinstaller-dist/agent-hub-backend");
+    let dev_path = PathBuf::from("../pyinstaller-dist").join(name);
     if dev_path.exists() {
         return dev_path;
     }
 
     // 3. Last resort: assume it's on PATH
-    PathBuf::from("agent-hub-backend")
+    PathBuf::from(name)
 }
 
 fn wait_for_backend(addr: &str, max_secs: u64) -> bool {
